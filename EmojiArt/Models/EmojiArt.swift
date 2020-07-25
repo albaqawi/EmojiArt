@@ -9,11 +9,13 @@
 import Foundation
 
 //model
-struct EmojiArt {
+//Encodable only works if all your var(s) are encodable so we needed to adjust the struct
+struct EmojiArt: Codable {
     var backgroundURL: URL?
     var emojis = [Emoji]()
     
-    struct Emoji:Identifiable {
+    //made it Codable that inherests ENCODABLE/DECODABLE
+    struct Emoji:Identifiable, Codable {
         let text: String
         var x: Int //offset from center
         var y: Int //offset from center
@@ -28,6 +30,24 @@ struct EmojiArt {
             self.size = size
             self.id = id
         }
+    }
+    // make model content into JSON
+    var json:Data? {
+        return try? JSONEncoder().encode(self)
+    }
+    // to bring it out of JSON, we use init? to make it a failable initilizer to get nil and know
+    // I tried to make EmojiArt with JSON but I could not!
+    init?(json: Data?) {
+        if json != nil, let newEmojiArt = try? JSONDecoder().decode(EmojiArt.self, from: json!) {
+            //set the model into the JSON structure
+            self = newEmojiArt
+        } else {
+            return nil
+        }
+    }
+    
+    init() {
+        //to restore init with default values as we lost that with declaring init?
     }
     
     private var uniqueEmojiId = 0
