@@ -11,7 +11,13 @@ import SwiftUI
 // this is the VIEW
             struct EmojiArtDocumentView: View {
                 @ObservedObject var document: EmojiArtDocument
+                
+                @State private var chosenPalette: String = ""
+
                 private let defualtEmojiSize: CGFloat = 40
+                
+                @State private var steadyStatePanOffset: CGSize = .zero
+                @GestureState private var gesturePanOffset: CGSize = .zero
                 
                 @State private var steadyStateZoomScale:CGFloat = 1.0
                 @GestureState private var gestureZoomScale: CGFloat = 1.0
@@ -22,19 +28,25 @@ import SwiftUI
                 
                 var body: some View {
                     VStack {
-                        ScrollView(.horizontal) {
-                            HStack {
-                                //turn each char and turn in into array of strings
-                                // the correct way is to use id, \ is key path in Swift to identify another var, . means on current var and self is the palette
-                                ForEach(EmojiArtDocument.palette.map { String($0) }, id: \.self) { emoji in
-                                    Text(emoji)
-                                        .font(Font.system(size: self.defualtEmojiSize))
-                                        .onDrag {
-                                            // this is old Obj C and this is why we need to case
-                                            // move from NS world to  Swift new world
-                                            return NSItemProvider(object: emoji as NSString)
+                        HStack {
+                            //we send the projected value of chosenPalette found in $chosenPalette
+                            PaletteChooser(document: document, chosenPalette: $chosenPalette)
+                            ScrollView(.horizontal) {
+                                HStack {
+                                    //turn each char and turn in into array of strings
+                                    // the correct way is to use id, \ is key path in Swift to identify another var, . means on current var and self is the palette
+                                    ForEach(chosenPalette.map { String($0) }, id: \.self) { emoji in
+                                        Text(emoji)
+                                            .font(Font.system(size: self.defualtEmojiSize))
+                                            .onDrag {
+                                                // this is old Obj C and this is why we need to case
+                                                // move from NS world to  Swift new world
+                                                return NSItemProvider(object: emoji as NSString)
+                                        }
                                     }
                                 }
+                                //to fix problem of at start we do not see the palette Category names
+                                .onAppear { self.chosenPalette = self.document.defaultPalette }
                             }
                         }
                         .padding(.horizontal)
@@ -48,11 +60,17 @@ import SwiftUI
                                 )
                                     .gesture(self.doubleTapToZoom(in: geometry.size))
                                 //Here is where we make a view to draw the dragged emojis on top of the backgound
-                                ForEach(self.document.emojis) { emoji in
-                                    Text(emoji.text)
-                                        .font(animatableWithSize: emoji.fontSize * self.zoomScale)
-//                                        .font(self.font(for: emoji))
-                                        .position(self.position(for: emoji, in: geometry.size))
+                                //make sure emojis showup with background not before
+                                if self.isLoading {
+                                    //add a view modifier to allow for timer spinning animation
+                                    Image(systemName: "hourglass").imageScale(.large).spinning()
+                                } else {
+                                    ForEach(self.document.emojis) { emoji in
+                                        Text(emoji.text)
+                                            .font(animatableWithSize: emoji.fontSize * self.zoomScale)
+                                            //                                        .font(self.font(for: emoji))
+                                            .position(self.position(for: emoji, in: geometry.size))
+                                    }
                                 }
                             }
                                 //Clips this view to its bounding rectangular frame - Zstack to not cover palette
@@ -63,6 +81,9 @@ import SwiftUI
                                 .gesture(self.zoomGesture())
                                 //2 next modifers moved to here as they both apply to ZStack
                                 .edgesIgnoringSafeArea([.horizontal, .bottom])
+                                .onReceive(self.document.$backgroundImage) { image in
+                                    self.zoomToFit(image, in: geometry.size)
+                                }
                                 //1st arg: what you want to drop we support 2 types public url images from internet and text characters(emojis), 2nd arg: this is a binding arg - letting us know when we drag over it, 3rd arg: function clousers
                                 //location was explained as a bug is on global device coordinants so we need to convert it to View Coor System - CGPoint
                                 .onDrop(of: ["public.image","public.text"], isTargeted: nil) { providers, location in
@@ -78,6 +99,12 @@ import SwiftUI
                             }
                         }
                     }
+                }
+                
+                var isLoading: Bool {
+                    // if both true then we are still loading
+                    // backgroundURL we need to make a gettable, so we make backgroundURL as computed var with get and set
+                    document.backgoundURL != nil && document.backgroundImage == nil
                 }
                                 
                 private func doubleTapToZoom(in size: CGSize) -> some Gesture {
@@ -99,9 +126,6 @@ import SwiftUI
                         self.steadyStateZoomScale *= finalGestureScale
                     }
                 }
-                
-                @State private var steadyStatePanOffset: CGSize = .zero
-                @GestureState private var gesturePanOffset: CGSize = .zero
                 
                 private var panOffset: CGSize {
                     (steadyStatePanOffset + gesturePanOffset) * zoomScale
@@ -136,6 +160,7 @@ import SwiftUI
                 
                 private func position(for emoji: EmojiArt.Emoji, in size: CGSize) ->  CGPoint {
                     var location = emoji.location
+                    //I had emoji.location.[every apperence] on all following 3 lines and it messed things up, why? do not forget answers!
                     location = CGPoint(x: location.x * zoomScale, y: location.y * zoomScale)
                     location = CGPoint(x: location.x + size.width/2, y: location.y + size.height/2)
                     // adjust for pan gesture
@@ -148,7 +173,7 @@ import SwiftUI
                     //if a url is found
                     var found = providers.loadFirstObject(ofType: URL.self) { url in
                         print("dropped \(url)")
-                        self.document.setBackgoundURL(url)
+                        self.document.backgoundURL = url
                     } //if we have a url then get the location, for dragging
                     if !found {
                         found = providers.loadObjects(ofType: String.self, using: { string in
